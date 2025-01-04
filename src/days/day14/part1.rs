@@ -24,7 +24,6 @@ pub fn part1(path: &str) -> u32 {
                 name: outs[1],
                 quantity: outs[0].trim().parse::<u32>().unwrap(),
             };
-
             let in_ores = ins
                 .split(", ")
                 .map(|ore_pair| {
@@ -43,25 +42,34 @@ pub fn part1(path: &str) -> u32 {
     let mut q = vec![("FUEL", 1)];
     let mut rem: HashMap<&str, u32> = HashMap::new();
 
+    let mut sum = 0;
     while !q.is_empty() {
-        let (req, amount) = q.remove(0);
+        let (req, mut amount) = q.remove(0);
         if req == "ORE" {
-            return amount;
+            sum += amount;
+            continue;
         }
 
         let reaction = dep.get(&req).unwrap();
-        let mult = amount / reaction.out.quantity + (amount % reaction.out.quantity == 0) as u32;
-
-        for reactant in &reaction.ins {
-            if let Some(r) = rem.get_mut(&reactant.name) {
-                if *r <= amount {
-                    *r = *r - amount;
-                }
+        if let Some(r) = rem.get_mut(&req) {
+            if *r <= amount {
+                amount -= *r;
+                *r = 0;
             } else {
+                *r = *r - amount;
+                amount = 0;
             }
         }
-        q.sort_by_key(|v| v.1);
+        let mult = amount / reaction.out.quantity + (amount % reaction.out.quantity != 0) as u32;
+        let remainder = reaction.out.quantity * mult - amount;
+        rem.entry(&req)
+            .and_modify(|v| *v += remainder)
+            .or_insert(remainder);
+
+        for reactant in &reaction.ins {
+            let r_req = reactant.quantity * mult;
+            q.push((reactant.name, r_req));
+        }
     }
-    println!("{:?}", dep);
-    panic!("No solution found");
+    sum
 }
