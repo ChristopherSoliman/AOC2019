@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 #[derive(Clone, Copy, Debug)]
 struct Parameter {
     index: usize,
@@ -241,6 +239,8 @@ impl Program {
     }
 }
 
+const DIRS: [(i8, i8); 4] = [(-1, 0), (0, 1), (1, 0), (0, -1)];
+
 pub fn part2(path: &str) -> u32 {
     let intcode = std::fs::read_to_string(path)
         .expect("File should be there")
@@ -252,99 +252,125 @@ pub fn part2(path: &str) -> u32 {
         })
         .collect::<Vec<_>>();
 
-    let ox_dirs = find_ox_path(&intcode);
+    let (grid, start) = create_grid(intcode.clone());
+    let path = get_path(&grid, &start);
+    println!("{:?}", path);
 
-    let mut seen: HashSet<(i32, i32)> = HashSet::new();
-    let mut q: Vec<(Vec<i32>, u32)> = vec![];
-    q.push((ox_dirs, 0));
-    let mut max_time = 0;
+    //Movement A,B,A,C,B,A,B,A,A,B
+    // A => L,11,L,11,R,5
+    // B => R,11,R,7,R,5,R,5
+    // C => R,7,L,11,L,11
 
-    while !q.is_empty() {
-        let (dirs, time) = q.remove(0);
-        if time > max_time {
-            max_time = time;
+    let routine = "A,B,A,C,B,A,B,C,C,B\n";
+    let a = "L,12,L,12,R,4\n";
+    let b = "R,10,R,6,R,4,R,4\n";
+    let c = "R,6,L,12,L,12\n";
+
+    let mut intcode = intcode.clone();
+    intcode[0] = 2;
+    let inputs = vec![routine, a, b, c, "n\n"];
+    let mut program = Program::new(intcode, vec![]);
+    let mut i = 0;
+    let mut out = 0;
+    loop {
+        if program.get_inputs().is_empty() && i < 5 {
+            *program.get_inputs() = inputs[i]
+                .chars()
+                .map(|c| c.to_ascii_uppercase() as i32)
+                .collect::<Vec<_>>();
+            i += 1;
         }
-        let mut pos = (0, 0);
-        let mut program = Program::new(intcode.clone(), dirs.clone());
-        for dir in &dirs {
-            match dir {
-                1 => pos.1 += 1,
-                2 => pos.1 -= 1,
-                3 => pos.0 -= 1,
-                4 => pos.0 += 1,
-                _ => unreachable!("invalid direction"),
-            }
-            program.execute();
-        }
 
-        seen.insert(pos);
-        for i in 1..=4 {
-            let mut new_pos = pos.clone();
-            match i {
-                1 => new_pos.1 += 1,
-                2 => new_pos.1 -= 1,
-                3 => new_pos.0 -= 1,
-                4 => new_pos.0 += 1,
-                _ => unreachable!("invalid direction"),
-            }
-            if seen.contains(&new_pos) {
-                continue;
-            }
-
-            let mut new_dirs = dirs.clone();
-
-            program.get_inputs().push(i as i32);
-            let status_code = program.execute().unwrap();
-
-            if status_code != 0 {
-                new_dirs.push(i as i32);
-                q.push((new_dirs, time + 1));
-                program.get_inputs().push(opposite(i as u8) as i32);
-                program.execute().unwrap();
-            }
+        if let Some(c) = program.execute() {
+            out = c;
+        } else {
+            break;
         }
     }
-    max_time
+    out as u32
 }
 
-fn find_ox_path(intcode: &Vec<i64>) -> Vec<i32> {
-    let mut q: Vec<Vec<i32>> = vec![];
-    q.push(vec![]);
-
-    while !q.is_empty() {
-        let dirs = q.remove(0);
-        let mut program = Program::new(intcode.clone(), dirs.clone());
-        for _ in 0..dirs.len() {
-            if program.execute().unwrap() == 2 {
-                return dirs;
+fn create_grid(intcode: Vec<i64>) -> (Vec<Vec<bool>>, (u32, u32)) {
+    let mut program = Program::new(intcode, vec![]);
+    let mut grid: Vec<Vec<bool>> = vec![];
+    let mut i = 0;
+    let mut j = 0;
+    let mut start: (u32, u32) = (0, 0);
+    grid.push(vec![]);
+    loop {
+        if let Some(c) = program.execute() {
+            match c {
+                10 => {
+                    i += 1;
+                    j = 0;
+                    grid.push(vec![]);
+                }
+                35 => grid[i].push(true),
+                94 => {
+                    grid[i].push(true);
+                    start = (i as u32, j);
+                }
+                46 => grid[i].push(false),
+                _ => unreachable!("invalid code"),
             }
-        }
-        for i in 1..=4 {
-            if !dirs.is_empty() && opposite(i) == *dirs.last().unwrap() as u8 {
-                continue;
-            }
-            let mut new_dirs = dirs.clone();
-
-            program.get_inputs().push(i as i32);
-            let status_code = program.execute().unwrap();
-
-            if status_code != 0 {
-                new_dirs.push(i as i32);
-                q.push(new_dirs);
-                program.get_inputs().push(opposite(i as u8) as i32);
-                program.execute().unwrap();
-            }
+            j += 1;
+        } else {
+            break;
         }
     }
-    panic!("no solution found");
+    grid.pop();
+    grid.pop();
+
+    (grid, start)
 }
 
-fn opposite(dir: u8) -> u8 {
-    match dir {
-        1 => 2,
-        2 => 1,
-        3 => 4,
-        4 => 3,
-        _ => unreachable!("invalid direction"),
+fn get_path(grid: &Vec<Vec<bool>>, start: &(u32, u32)) -> Vec<(&'static str, u32)> {
+    let mut current = *start;
+    let mut path: Vec<(&str, u32)> = vec![];
+    let mut cd = 0;
+
+    'main_loop: loop {
+        let (r, c) = current;
+        let (nr, nc) = (r as i32 + DIRS[cd].0 as i32, c as i32 + DIRS[cd].1 as i32);
+        if valid(&(nr, nc), &grid) {
+            let last = path.pop().unwrap();
+            path.push((last.0, last.1 + 1));
+            current = (nr as u32, nc as u32);
+            continue;
+        }
+
+        for i in 0..3 {
+            if i == 1 {
+                continue;
+            }
+            let new_dir = (cd as i32 + (i as i32 - 1)).rem_euclid(4) as usize;
+
+            let (nr, nc) = (
+                r as i32 + DIRS[new_dir].0 as i32,
+                c as i32 + DIRS[new_dir].1 as i32,
+            );
+
+            if valid(&(nr, nc), &grid) {
+                let mut str_dir = "L";
+                if i == 2 {
+                    str_dir = "R";
+                }
+                cd = new_dir;
+                path.push((str_dir, 0));
+                continue 'main_loop;
+            }
+        }
+        break;
     }
+
+    path
+}
+
+fn valid(current: &(i32, i32), grid: &Vec<Vec<bool>>) -> bool {
+    let (nr, nc) = *current;
+    return 0 <= nr
+        && nr < grid.len() as i32
+        && 0 <= nc
+        && nc < grid[0].len() as i32
+        && grid[nr as usize][nc as usize];
 }
