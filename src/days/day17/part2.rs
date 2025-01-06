@@ -253,13 +253,12 @@ pub fn part2(path: &str) -> u32 {
         .collect::<Vec<_>>();
 
     let (grid, start) = create_grid(intcode.clone());
-    let path = get_path(&grid, &start);
-    println!("{:?}", path);
+    let _path = get_path(&grid, &start);
 
     //Movement A,B,A,C,B,A,B,A,A,B
-    // A => L,11,L,11,R,5
-    // B => R,11,R,7,R,5,R,5
-    // C => R,7,L,11,L,11
+    // A => L,12,L,12,R,4
+    // B => R,10,R,6,R,4,R,4
+    // C => R,6,L,12,L,12
 
     let routine = "A,B,A,C,B,A,B,C,C,B\n";
     let a = "L,12,L,12,R,4\n";
