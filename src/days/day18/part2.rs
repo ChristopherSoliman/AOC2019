@@ -1,11 +1,34 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 const DIRS: [(i8, i8); 4] = [(-1, 0), (0, 1), (1, 0), (0, -1)];
 const A_UPPER: u32 = 'A' as u32;
 const A_LOWER: u32 = 'a' as u32;
 
-fn is_key_found(door: &char, bit_map: &u32) -> bool {
+#[derive(Eq, PartialEq)]
+struct State {
+    robots: [(usize, usize); 4],
+    keys: u32,
+    steps: u32,
+}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.steps.cmp(&self.steps)
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(&other))
+    }
+}
+
+fn can_unlock_door(door: &char, bit_map: &u32) -> bool {
     bit_map & (1 << (*door as u32 - A_UPPER)) != 0
+}
+
+fn is_key_found(key: &char, bit_map: &u32) -> bool {
+    bit_map & (1 << (*key as u32 - A_LOWER)) != 0
 }
 
 fn add_key(key: &char, bit_map: &u32) -> u32 {
@@ -44,10 +67,9 @@ pub fn part2(path: &str) -> u32 {
     let height = grid.len() as i32;
     let width = grid[0].len() as i32;
 
-    let found_keys = 2_u32.pow(keys_count) - 1;
+    let all_keys = 2_u32.pow(keys_count) - 1;
     const NEW_VEC: Vec<char> = vec![];
     let mut keys: [Vec<char>; 4] = [NEW_VEC; 4];
-    let mut doors: [Vec<char>; 4] = [NEW_VEC; 4];
 
     for i in 0..height as usize {
         for j in 0..width as usize {
@@ -57,163 +79,110 @@ pub fn part2(path: &str) -> u32 {
                     k = 0;
                 } else if i < height as usize / 2 && j > width as usize / 2 {
                     k = 1;
-                } else if i > height as usize / 2 && j < width as usize / 2 {
+                } else if i > height as usize / 2 && j > width as usize / 2 {
                     k = 2;
                 }
                 keys[k].push(grid[i][j]);
             }
-            if ('A'..='Z').contains(&grid[i][j]) {
-                let mut k = 3;
-                if i < height as usize / 2 && j < width as usize / 2 {
-                    k = 0;
-                } else if i < height as usize / 2 && j > width as usize / 2 {
-                    k = 1;
-                } else if i > height as usize / 2 && j > width as usize / 2 {
-                    k = 2;
-                }
-                doors[k].push(grid[i][j]);
-            }
         }
     }
 
-    let mut masks: [u32; 4] = [0; 4];
-    for i in 0..doors.len() {
-        for door in &doors[i] {
-            masks[i] |= 1 << (*door as u32 - A_UPPER);
+    let mut key_masks: [u32; 4] = [0; 4];
+    for i in 0..keys.len() {
+        for key in &keys[i] {
+            key_masks[i] |= 1 << (*key as u32 - A_LOWER);
         }
     }
-
-    let start_1 = (start.0 - 1, start.1 - 1);
-    let start_2 = (start.0 - 1, start.1 + 1);
-    let start_3 = (start.0 + 1, start.1 + 1);
-    let start_4 = (start.0 + 1, start.1 - 1);
+    let starts: [(usize, usize); 4] = [
+        (start.0 - 1, start.1 - 1),
+        (start.0 - 1, start.1 + 1),
+        (start.0 + 1, start.1 + 1),
+        (start.0 + 1, start.1 - 1),
+    ];
 
     grid[start.0 - 1][start.1] = '#';
     grid[start.0 + 1][start.1] = '#';
     grid[start.0][start.1 - 1] = '#';
     grid[start.0][start.1 + 1] = '#';
 
-    let mut q: Vec<([(usize, usize); 4], u32, u32)> =
-        vec![([start_1, start_2, start_3, start_4], 0, 0)];
+    let mut q: BinaryHeap<State> = BinaryHeap::new();
     let mut seen: HashSet<([(usize, usize); 4], u32)> = HashSet::new();
-    let mut cache: HashMap<((usize, usize), usize, u32), Vec<((usize, usize), u32, u32)>> =
+    let mut cache: HashMap<((usize, usize), u32), Vec<((usize, usize), u32, char)>> =
         HashMap::new();
 
-    while !q.is_empty() {
-        let (robots, keys, steps) = q.remove(0);
-        if seen.len() % 1000 == 0 {
-            println!("{}, {:0b}", seen.len(), keys);
+    q.push(State {
+        robots: starts,
+        keys: 0,
+        steps: 0,
+    });
+
+    while let Some(state) = q.pop() {
+        if state.keys == all_keys {
+            return state.steps;
         }
-        if keys == found_keys {
-            return steps;
-        }
-        if seen.contains(&(robots, keys)) {
+        if seen.contains(&(state.robots, state.keys)) {
             continue;
         }
-        seen.insert((robots, keys));
+        seen.insert((state.robots, state.keys));
 
-        for i in 0..4 {
-            let mut new_robots = robots.clone();
-            let options = possible_moves(&robots[i], &grid, &(keys & masks[i]), &i, &mut cache);
-            for (new_pos, new_keys, new_steps) in options {
-                new_robots[i] = new_pos;
-                q.push((new_robots, new_keys | keys, new_steps + steps));
+        for (i, robot) in state.robots.iter().enumerate() {
+            for (npos, nd, key) in reachable_keys(&robot, &state.keys, &grid, &mut cache).iter() {
+                let mut new_robots = state.robots.clone();
+                new_robots[i] = *npos;
+                let new_keys = add_key(key, &state.keys);
+                q.push(State {
+                    robots: new_robots,
+                    keys: new_keys,
+                    steps: state.steps + nd,
+                });
             }
-            //for dir in DIRS {
-            //    let (nr, nc) = (
-            //        robots[i].0 as i32 + dir.0 as i32,
-            //        robots[i].1 as i32 + dir.1 as i32,
-            //    );
-            //    if nr < 0 || nr >= height || nc < 0 || nc >= width {
-            //        continue;
-            //    }
-            //    let (nr, nc) = (nr as usize, nc as usize);
-            //    let mut new_keys = keys;
-            //    match grid[nr][nc] {
-            //        '#' => continue,
-            //        'A'..='Z' => {
-            //            if !is_key_found(&grid[nr][nc], &keys) {
-            //                continue;
-            //            }
-            //        }
-            //        'a'..='z' => new_keys = add_key(&grid[nr][nc], &mut new_keys),
-            //        _ => {}
-            //    }
-            //    new_robots[i] = (nr, nc);
-            //    q.push((new_robots, new_keys, steps + 1));
-            //}
         }
-        q.sort_by_key(|v| v.2);
     }
-    panic!("no solution found");
+
+    panic!("No solution found");
 }
 
-fn possible_moves(
+fn reachable_keys(
     pos: &(usize, usize),
+    keys: &u32,
     grid: &Vec<Vec<char>>,
-    original_keys: &u32,
-    robot: &usize,
-    cache: &mut HashMap<((usize, usize), usize, u32), Vec<((usize, usize), u32, u32)>>, //original_seen: &HashSet<((usize, usize), u32)>,
-) -> Vec<((usize, usize), u32, u32)> {
-    if let Some(result) = cache.get(&(*pos, *robot, *original_keys)) {
-        return result.to_vec();
+    cache: &mut HashMap<((usize, usize), u32), Vec<((usize, usize), u32, char)>>,
+) -> Vec<((usize, usize), u32, char)> {
+    if let Some(v) = cache.get(&(*pos, *keys)) {
+        return v.clone();
     }
     let height = grid.len() as i32;
     let width = grid[0].len() as i32;
-    let mut q: Vec<((usize, usize), u32, u32)> = vec![(*pos, *original_keys, 0)];
+
+    let mut reachable: Vec<((usize, usize), u32, char)> = vec![];
+    let mut q: VecDeque<((usize, usize), u32)> = VecDeque::from(vec![(*pos, 0)]);
     let mut seen: HashSet<((usize, usize), u32)> = HashSet::new();
 
-    let mut options: HashMap<((usize, usize), u32), u32> = HashMap::new();
-    while !q.is_empty() {
-        let (robot, keys, dist) = q.remove(0);
-        if seen.contains(&(robot, keys)) {
-            //|| original_seen.contains(&(robot, keys)) {
-            continue;
+    while let Some((pos, d)) = q.pop_front() {
+        if ('a'..='z').contains(&grid[pos.0][pos.1]) && !is_key_found(&grid[pos.0][pos.1], &keys) {
+            reachable.push((pos, d, grid[pos.0][pos.1]));
         }
-        seen.insert((robot, keys));
         for dir in DIRS {
-            let (nr, nc) = (robot.0 as i32 + dir.0 as i32, robot.1 as i32 + dir.1 as i32);
+            let (nr, nc) = (pos.0 as i32 + dir.0 as i32, pos.1 as i32 + dir.1 as i32);
             if nr < 0 || nr >= height || nc < 0 || nc >= width {
                 continue;
             }
             let (nr, nc) = (nr as usize, nc as usize);
-            let mut new_keys = keys;
+            let new_robot = (nr, nc);
+            if seen.contains(&(new_robot, *keys)) {
+                continue;
+            }
+            seen.insert((new_robot, *keys));
             match grid[nr][nc] {
                 '#' => continue,
-                'A'..='Z' => {
-                    let new_robot = (nr, nc);
-                    if !is_key_found(&grid[nr][nc], &new_keys) {
-                        let old_dist = options.get(&(robot, new_keys)).unwrap_or(&u32::MAX);
-                        if *old_dist > dist {
-                            options.insert((robot, new_keys), dist);
-                        }
-                        continue;
-                    }
-                    q.push((new_robot, new_keys, dist + 1));
-                }
-                'a'..='z' => {
-                    let new_robot = (nr, nc);
-                    new_keys = add_key(&grid[nr][nc], &mut new_keys);
-                    q.push((new_robot, new_keys, dist + 1));
-                    let old_dist = options.get(&(new_robot, new_keys)).unwrap_or(&u32::MAX);
-                    if *old_dist > dist + 1 {
-                        options.insert((new_robot, new_keys), dist + 1);
-                    }
-                }
-                _ => {
-                    let new_robot = (nr, nc);
-                    q.push((new_robot, new_keys, dist + 1));
-                }
+                'A'..='Z' if !can_unlock_door(&grid[nr][nc], &keys) => continue,
+                'a'..='z' => {}
+                _ => {}
             }
+            q.push_back((new_robot, d + 1));
         }
     }
-    //println!("{:?}", options);
-    let options = options
-        .into_iter()
-        .map(|(k, v)| (k.0, k.1, v))
-        .collect::<Vec<_>>();
+    cache.insert((*pos, *keys), reachable.clone());
 
-    cache.insert((*pos, *robot, *original_keys), options.clone());
-
-    options
+    reachable
 }
