@@ -8,16 +8,15 @@ pub fn part1(path: &str) -> u32 {
         .lines()
         .map(|l| l.chars().collect::<Vec<_>>())
         .collect::<Vec<_>>();
+
     let mut grid: Vec<Vec<bool>> = vec![];
+
     let height = raw_grid.len();
     let width = raw_grid.iter().map(|r| r.len()).max().unwrap();
 
     let (inner_i, inner_j) = get_inner_bounds(&raw_grid, &width, &height);
 
     let (jumps, start, end) = get_jumps(&raw_grid, &width, &height, &inner_i, &inner_j);
-
-    let mut q: Vec<((usize, usize), u32)> = vec![(start, 0)];
-    let mut seen: HashSet<(usize, usize)> = HashSet::new();
 
     for i in 0..height {
         let mut v = vec![];
@@ -30,12 +29,24 @@ pub fn part1(path: &str) -> u32 {
         }
         grid.push(v);
     }
+    bfs(&grid, &start, &end, &jumps)
+}
 
+fn bfs(
+    grid: &Vec<Vec<bool>>,
+    start: &(usize, usize),
+    end: &(usize, usize),
+    jumps: &HashMap<(usize, usize), (usize, usize)>,
+) -> u32 {
     let height = grid.len() as i32;
     let width = grid[0].len() as i32;
+
+    let mut q: Vec<((usize, usize), u32)> = vec![(*start, 0)];
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+
     while !q.is_empty() {
         let (pos, steps) = q.remove(0);
-        if pos == end {
+        if pos == *end {
             return steps;
         }
         if seen.contains(&pos) {
