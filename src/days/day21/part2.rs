@@ -256,9 +256,8 @@ pub fn part2(path: &str) -> u32 {
     springcode += "OR T J\n";
     springcode += "NOT E T\n";
     springcode += "AND H T\n";
-    springcode += "AND J T\n";
-    springcode += "AND E J\n";
-    springcode += "OR T J\n";
+    springcode += "OR E T\n";
+    springcode += "AND T J\n";
     springcode += "AND D J\n";
     springcode += "NOT A T\n";
     springcode += "OR T J\n";
