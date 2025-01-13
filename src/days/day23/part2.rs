@@ -174,11 +174,9 @@ impl Program {
     }
 
     pub fn read_outputs(&mut self, max: usize) -> Vec<i64> {
-        let mut outputs = vec![];
-        let mut i = 0;
-        while i < max && i < outputs.len() {
-            outputs.push(self.pending_outputs.remove(0));
-        }
+        let max = std::cmp::min(max, self.pending_outputs.len());
+        let outputs = self.pending_outputs[0..max].to_vec();
+        self.pending_outputs = self.pending_outputs[max..].to_vec();
         outputs
     }
 
@@ -222,7 +220,6 @@ impl Program {
                 Operation::Output => {
                     let params =
                         opcode.get_params(&self.intcode, &self.ipointer, &self.relative_base);
-                    println!("output: {}", params[0].value);
                     self.pending_outputs.push(params[0].value);
                 }
                 Operation::JumpIfTrue => {
@@ -293,7 +290,12 @@ pub fn part2(path: &str) -> i64 {
         nics.push(Program::new(intcode.clone(), vec![i as i64]));
     }
 
+    let mut nat = (0, 0);
+    let mut prev_y = -1;
+    let mut idle;
+
     loop {
+        idle = true;
         for i in 0..N {
             let nic = &mut nics[i];
             if *nic.status() == Status::Halted {
@@ -302,24 +304,28 @@ pub fn part2(path: &str) -> i64 {
             if *nic.status() == Status::WaitingForInput {
                 nic.get_pending_inputs().push(-1);
             }
-            //println!("{i} => in: {:?}", nic.get_pending_inputs());
             nic.run();
-            let outputs = nic.read_all_outputs();
-            //println!("{i} => out: {:?}", outputs);
-            //println!("{i} => status: {:?}", nic.status());
-            let mut k = 0;
-            while k + 3 < outputs.len() {
-                if outputs[k] == 255 {
-                    return outputs[k + 2];
+            let outputs = nic.read_outputs(3);
+            if outputs.len() != 0 {
+                idle = false;
+                if outputs[0] == 255 {
+                    nat = (outputs[1], outputs[2]);
+                } else {
+                    nics[outputs[0] as usize]
+                        .get_pending_inputs()
+                        .push(outputs[1]);
+                    nics[outputs[0] as usize]
+                        .get_pending_inputs()
+                        .push(outputs[2]);
                 }
-                nics[outputs[k] as usize]
-                    .get_pending_inputs()
-                    .push(outputs[k + 1]);
-                nics[outputs[k] as usize]
-                    .get_pending_inputs()
-                    .push(outputs[k + 2]);
-                k += 3;
             }
+        }
+        if idle {
+            *nics[0].get_pending_inputs() = vec![nat.0, nat.1];
+            if nat.1 == prev_y {
+                return nat.1 as i64;
+            }
+            prev_y = nat.1;
         }
     }
 }

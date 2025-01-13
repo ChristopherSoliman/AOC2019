@@ -139,29 +139,45 @@ enum Status {
     Idle,
     Running,
     WaitingForInput,
+    Halted,
 }
 
 struct Program {
     intcode: Vec<i64>,
-    ipointer: usize,
-    inputs: Vec<i64>,
     status: Status,
+    ipointer: usize,
+    pending_inputs: Vec<i64>,
+    pending_outputs: Vec<i64>,
     relative_base: i64,
 }
 
 impl Program {
-    pub fn new(intcode: Vec<i64>, inputs: Vec<i64>) -> Self {
+    pub fn new(intcode: Vec<i64>, pending_inputs: Vec<i64>) -> Self {
         Self {
             intcode,
             ipointer: 0,
             relative_base: 0,
             status: Status::Idle,
-            inputs,
+            pending_inputs,
+            pending_outputs: vec![],
         }
     }
 
-    pub fn get_inputs(&mut self) -> &mut Vec<i64> {
-        &mut self.inputs
+    pub fn get_pending_inputs(&mut self) -> &mut Vec<i64> {
+        &mut self.pending_inputs
+    }
+
+    pub fn read_all_outputs(&mut self) -> Vec<i64> {
+        let outputs = self.pending_outputs.clone();
+        self.pending_outputs.clear();
+        outputs
+    }
+
+    pub fn read_outputs(&mut self, max: usize) -> Vec<i64> {
+        let max = std::cmp::min(max, self.pending_outputs.len());
+        let outputs = self.pending_outputs[0..max].to_vec();
+        self.pending_outputs = self.pending_outputs[max..].to_vec();
+        outputs
     }
 
     pub fn status(&self) -> &Status {
@@ -174,7 +190,7 @@ impl Program {
         }
     }
 
-    pub fn execute(&mut self) -> Option<i64> {
+    pub fn run(&mut self) {
         self.status = Status::Running;
         while self.intcode[self.ipointer] != 99 {
             let opcode = Opcode::from_int(self.intcode[self.ipointer] as u32);
@@ -192,21 +208,19 @@ impl Program {
                     self.intcode[params[2].index] = params[0].value * params[1].value;
                 }
                 Operation::Input => {
-                    if self.inputs.len() == 0 {
+                    if self.pending_inputs.len() == 0 {
                         self.status = Status::WaitingForInput;
-                        return None;
+                        return;
                     }
                     let params =
                         opcode.get_params(&self.intcode, &self.ipointer, &self.relative_base);
                     self.fill_empty(&params[0].index);
-                    self.intcode[params[0].index] = self.inputs.remove(0) as i64;
+                    self.intcode[params[0].index] = self.pending_inputs.remove(0) as i64;
                 }
                 Operation::Output => {
                     let params =
                         opcode.get_params(&self.intcode, &self.ipointer, &self.relative_base);
-                    self.ipointer += opcode.variables as usize + 1;
-                    self.status = Status::Idle;
-                    return Some(params[0].value);
+                    self.pending_outputs.push(params[0].value);
                 }
                 Operation::JumpIfTrue => {
                     let params =
@@ -252,10 +266,9 @@ impl Program {
                     self.relative_base += params[0].value;
                 }
             }
-
             self.ipointer += opcode.variables as usize + 1;
         }
-        None
+        self.status = Status::Halted;
     }
 }
 
@@ -279,27 +292,26 @@ pub fn part1(path: &str) -> i64 {
 
     loop {
         for i in 0..N {
-            if *nics[i].status() == Status::WaitingForInput {
-                nics[i].get_inputs().push(-1);
-            }
-            let mut outs: [i64; 3] = [-1; 3];
-            for k in 0..3 {
-                if let Some(out) = nics[i].execute() {
-                    outs[k] = out;
-                    println!("out = {out}");
-                }
-                if *nics[i].status() == Status::WaitingForInput {
-                    continue;
-                }
-            }
-            if outs[0] == -1 {
+            let nic = &mut nics[i];
+            if *nic.status() == Status::Halted {
                 continue;
             }
-            if outs[0] == 255 {
-                return outs[2];
+            if *nic.status() == Status::WaitingForInput {
+                nic.get_pending_inputs().push(-1);
             }
-            nics[outs[0] as usize].get_inputs().push(outs[1]);
-            nics[outs[0] as usize].get_inputs().push(outs[2]);
+            nic.run();
+            let outputs = nic.read_outputs(3);
+            if outputs.len() != 0 {
+                if outputs[0] == 255 {
+                    return outputs[2];
+                }
+                nics[outputs[0] as usize]
+                    .get_pending_inputs()
+                    .push(outputs[1]);
+                nics[outputs[0] as usize]
+                    .get_pending_inputs()
+                    .push(outputs[2]);
+            }
         }
     }
 }
